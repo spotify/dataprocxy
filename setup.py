@@ -9,4 +9,5 @@ setup(name='dataprocxy',
       license='Apache',
       packages=['dataprocxy'],
       install_requires=['google-api-python-client'],
+      scripts=['bin/dataprocxy'],
       zip_safe=False)
