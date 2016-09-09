@@ -86,6 +86,7 @@ class DataProcxy():
         parser.add_argument('--project', help='cloud project of the dataproc cluster', nargs="?",
                             required=True)
         args = parser.parse_args()
+        self.project_id = args.project
         if args.job is None and args.cluster is None:
             print 'Either job or cluster need to be specified'
             exit(1)
@@ -93,7 +94,6 @@ class DataProcxy():
             self.cluster_name = self.get_cluster_from_job(job_id=args.job)
         else:
             self.cluster_name = args.cluster
-        self.project_id = args.project
 
     def get_cluster_from_job(self, job_id):
         request = self.dataproc_service.projects().regions().jobs().get(projectId=self.project_id,
