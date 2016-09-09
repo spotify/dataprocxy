@@ -180,7 +180,7 @@ class Browser():
             self.browser_process = subprocess.Popen(
                 'open -W -n -a "Google Chrome" --args ' + chrome_args, shell=True)
         else:
-            self.browser_process = subprocess.Popen('google-chrome ' + chrome_args, Shell=True)
+            self.browser_process = subprocess.Popen('google-chrome ' + chrome_args, shell=True)
 
     def wait(self):
         return self.browser_process.wait()
