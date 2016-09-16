@@ -177,10 +177,11 @@ class Browser():
 
         print "proxy connected via ssh, starting chrome"
         if platform.system() == "Darwin":
+            chrome_path = subprocess.check_output(["mdfind","kMDItemCFBundleIdentifier","=","com.google.Chrome"]).split("\n")[0] + '/Contents/MacOS/Google Chrome'
             self.browser_process = subprocess.Popen(
-                'open -W -n -a "Google Chrome" --args ' + chrome_args, shell=True)
+                '"' + chrome_path + '" ' + chrome_args, shell=True)
         else:
-            self.browser_process = subprocess.Popen('google-chrome ' + chrome_args, shell=True)
+            self.browser_process = subprocess.Popen('google-chrome ' + chrome_args, Shell=True)
 
     def wait(self):
         return self.browser_process.wait()
