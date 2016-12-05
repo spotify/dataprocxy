@@ -23,17 +23,21 @@ class DataProcxy():
         signal.signal(signal.SIGINT, lambda s, f: self.shutdown())
 
     def run(self):
-        try:
-            credentials = GoogleCredentials.get_application_default()
-        except ApplicationDefaultCredentialsError as msg:
-            out = subprocess.check_output("gcloud auth application-default login", shell=True, stderr=subprocess.STDOUT)
-            success = False
-            for line in out:
-                if "You are now logged in as" in out:
-                    success = True
-            if not success:
-                print "unable to authenticate:"
-                exit(1)
+        retries = 5
+        for retry in range (0,retries):
+            try:
+                credentials = GoogleCredentials.get_application_default()
+            except ApplicationDefaultCredentialsError as msg:
+                out = subprocess.check_output("gcloud auth application-default login", shell=True, stderr=subprocess.STDOUT)
+                success = False
+                for line in out:
+                    if "You are now logged in as" in out:
+                        success = True
+                if not success:
+                    print "unable to authenticate:"
+                    exit(1)
+                else:
+                    break
 
         self.dataproc_service = discovery.build('dataproc', 'v1', credentials=credentials)
         self.gce_service = discovery.build('compute', 'v1', credentials=credentials)
