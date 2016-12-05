@@ -26,7 +26,7 @@ class DataProcxy():
         try:
             credentials = GoogleCredentials.get_application_default()
         except ApplicationDefaultCredentialsError as msg:
-            out = subprocess.check_output("gcloud auth login", shell=True, stderr=subprocess.STDOUT)
+            out = subprocess.check_output("gcloud auth application-default login", shell=True, stderr=subprocess.STDOUT)
             success = False
             for line in out:
                 if "You are now logged in as" in out:
