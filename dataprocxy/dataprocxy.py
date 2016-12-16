@@ -6,6 +6,7 @@ import socket
 import subprocess
 import tempfile
 import time
+import os
 
 from pprint import pprint
 
@@ -24,6 +25,8 @@ class DataProcxy():
 
     def run(self):
         retries = 5
+        if os.environ.get('GOOGLE_APPLICATION_CREDENTIALS') is not None:
+            print "WARNING: GOOGLE_APPLICATION_CREDENTIALS environment variable is set, using credentials from %s to access gcloud" % os.environ['GOOGLE_APPLICATION_CREDENTIALS']
         for retry in range (0,retries):
             try:
                 credentials = GoogleCredentials.get_application_default()
