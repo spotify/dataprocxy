@@ -62,7 +62,7 @@ class DataProcxy():
         self.proxy.start()
         self.proxy.wait()  # blocks until ssh process becomes available
         self.browser = Browser(project_id=self.project_id, zone=zone, master_node=master_node,
-                               proxy_port=port)
+                               proxy_port=port, uris=self.uris)
         self.browser.start()
         self.browser.wait()
 
@@ -92,8 +92,10 @@ class DataProcxy():
                             nargs="?")
         parser.add_argument('--project', help='cloud project of the dataproc cluster', nargs="?",
                             required=True)
+        parser.add_argument('uris', nargs='*', help='URIs to be opened!')
         args = parser.parse_args()
         self.project_id = args.project
+        self.uris = args.uris
         if args.job is None and args.cluster is None:
             print 'Either job or cluster need to be specified'
             exit(1)
@@ -168,16 +170,18 @@ class SshProxy():
 
 
 class Browser():
-    def __init__(self, project_id, zone, master_node, proxy_port):
+    def __init__(self, project_id, zone, master_node, proxy_port, uris):
         self.proxyPort = proxy_port
         self.masterNode = master_node
         self.zone = zone
         self.projectId = project_id
+        self.uris = uris
         self.browser_process = None
 
     def start(self):
         self.tempdir = tempfile.mkdtemp()
-        chrome_args = '--proxy-server="socks5://localhost:%(port)i" --host-resolver-rules="MAP * 0.0.0.0 , EXCLUDE localhost" --user-data-dir=%(tempdir)s --no-default-browser-check --no-first-run --enable-kiosk-mode --new-window "http://%(masterNode)s:8088" "http://%(masterNode)s:50070" "http://%(masterNode)s:19888/jobhistory/"' % {
+        more_uris = " ".join(['"' + uri + '"' for uri in self.uris])
+        chrome_args = ('--proxy-server="socks5://localhost:%(port)i" --host-resolver-rules="MAP * 0.0.0.0 , EXCLUDE localhost" --user-data-dir=%(tempdir)s --no-default-browser-check --no-first-run --enable-kiosk-mode --new-window "http://%(masterNode)s:8088" "http://%(masterNode)s:50070" "http://%(masterNode)s:19888/jobhistory/" ' + more_uris) % {
             "masterNode": self.masterNode, "port": self.proxyPort, "projectId": self.projectId,
             "zone": self.zone,
             "tempdir": self.tempdir}
