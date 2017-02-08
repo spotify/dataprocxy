@@ -1,3 +1,4 @@
+# Copyright (c) 2015 Spotify AB
 import argparse
 import platform
 import random

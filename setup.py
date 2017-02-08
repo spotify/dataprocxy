@@ -1,3 +1,4 @@
+# Copyright (c) 2015 Spotify AB
 from setuptools import setup
 
 setup(name='dataprocxy',
@@ -6,7 +7,7 @@ setup(name='dataprocxy',
       url='https://github.com/spotify/dataprocxy',
       author='Johannes Russek',
       author_email='jrussek@spotify.com',
-      license='Apache',
+      license='Apache 2.0',
       packages=['dataprocxy'],
       install_requires=['google-api-python-client'],
       scripts=['bin/dataprocxy'],
