@@ -2,7 +2,7 @@
 Uses `gcloud` to set up a socksv5 proxy to the google cloud dataproc master node and opens a Chrome browser configured with this proxy to open pages of interest. Used experimentally at Spotify.
 
 # Install
-Clone this repository then `pip install .`.
+Installation through pip: `pip install dataprocxy` or alternatively, clone this repository then `pip install .`.
 
 # Code of Conduct
 This project adheres to the [Open Code of Conduct][code-of-conduct]. By participating, you are expected to honor this code.
