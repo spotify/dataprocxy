@@ -149,7 +149,7 @@ class SshProxy():
             break
 
     def start(self):
-        ssh_command = 'gcloud -q compute ssh %(masterNode)s --ssh-flag="-x" --ssh-flag="-o ConnectTimeout=5" --ssh-flag="-D localhost:%(port)i" --ssh-flag="-n" --ssh-flag="-N" --project %(projectId)s --zone %(zone)s' % {
+        ssh_command = 'gcloud -q compute ssh %(masterNode)s --project %(projectId)s --zone %(zone)s -- -x -o ConnectTimeout=5 -D localhost:%(port)i -n -N' % {
             "masterNode": self.master_node, "port": self.proxy_port, "projectId": self.project_id,
             "zone": self.zone}
         print "executing %s" % ssh_command
