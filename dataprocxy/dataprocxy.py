@@ -22,6 +22,7 @@ class DataProcxy():
         self.gce_service = None
         self.proxy = None
         self.browser = None
+        self.region = None
         signal.signal(signal.SIGINT, lambda s, f: self.shutdown())
 
     def run(self):
@@ -78,7 +79,7 @@ class DataProcxy():
     def query_cluster(self):
         request = self.dataproc_service.projects().regions().clusters().get(
             projectId=self.project_id,
-            region='global',
+            region=self.region,
             clusterName=self.cluster_name)
         response = request.execute()
         master_node = response['config']['masterConfig']['instanceNames'][0].encode('utf8')
@@ -93,10 +94,14 @@ class DataProcxy():
                             nargs="?")
         parser.add_argument('--project', help='cloud project of the dataproc cluster', nargs="?",
                             required=True)
+        parser.add_argument('region', nargs='?',
+                            help='Dataproc region to query',
+                            default='global')
         parser.add_argument('uris', nargs='*', help='URIs to be opened!')
         args = parser.parse_args()
         self.project_id = args.project
         self.uris = args.uris
+        self.region = args.region
         if args.job is None and args.cluster is None:
             print 'Either job or cluster need to be specified'
             exit(1)
@@ -107,7 +112,7 @@ class DataProcxy():
 
     def get_cluster_from_job(self, job_id):
         request = self.dataproc_service.projects().regions().jobs().get(projectId=self.project_id,
-                                                                        region='global',
+                                                                        region=self.region,
                                                                         jobId=job_id)
         response = request.execute()
         cluster_name = response['placement']['clusterName'].encode('utf8')
