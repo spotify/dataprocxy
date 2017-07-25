@@ -2,7 +2,7 @@
 from setuptools import setup
 
 setup(name='dataprocxy',
-      version='0.1',
+      version='0.2',
       description='using a dataproc job or cluster id and a project, open a browser to important URLs using an ssh SOCKS proxy',
       url='https://github.com/spotify/dataprocxy',
       author='Johannes Russek',
