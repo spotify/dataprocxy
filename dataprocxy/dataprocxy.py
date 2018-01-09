@@ -1,5 +1,6 @@
 # Copyright (c) 2015 Spotify AB
 import argparse
+import os
 import platform
 import random
 import signal
@@ -7,11 +8,8 @@ import socket
 import subprocess
 import tempfile
 import time
-import os
-
-from pprint import pprint
-
 from googleapiclient import discovery
+from googleapiclient.errors import HttpError
 from oauth2client.client import ApplicationDefaultCredentialsError
 from oauth2client.client import GoogleCredentials
 
@@ -28,12 +26,15 @@ class DataProcxy():
     def run(self):
         retries = 5
         if os.environ.get('GOOGLE_APPLICATION_CREDENTIALS') is not None:
-            print "WARNING: GOOGLE_APPLICATION_CREDENTIALS environment variable is set, using credentials from %s to access gcloud" % os.environ['GOOGLE_APPLICATION_CREDENTIALS']
-        for retry in range (0,retries):
+            print "WARNING: GOOGLE_APPLICATION_CREDENTIALS environment variable is set, using credentials from %s to access gcloud" % \
+                  os.environ['GOOGLE_APPLICATION_CREDENTIALS']
+        for retry in range(0, retries):
             try:
                 credentials = GoogleCredentials.get_application_default()
             except ApplicationDefaultCredentialsError as msg:
-                out = subprocess.check_output("gcloud -q auth application-default login", shell=True, stderr=subprocess.STDOUT)
+                out = subprocess.check_output("gcloud -q auth application-default login",
+                                              shell=True,
+                                              stderr=subprocess.STDOUT)
                 success = False
                 for line in out:
                     if "You are now logged in as" in out:
@@ -72,9 +73,7 @@ class DataProcxy():
 
     def get_master_status(self, master_node, zone):
         try:
-            request = self.gce_service.instances().get(project=self.project_id,
-                                                       zone=zone,
-                                                       instance=master_node)
+            request = self.gce_service.instances().get(project=self.project_id, zone=zone, instance=master_node)
             response = request.execute()
             return response['status'].encode('utf8')
         except HttpError as error:
@@ -83,17 +82,16 @@ class DataProcxy():
             exit(1)
 
     def query_cluster(self):
-        response = []
         try:
             request = self.dataproc_service.projects().regions().clusters().get(projectId=self.project_id,
                                                                                 region=self.region,
                                                                                 clusterName=self.cluster_name)
             response = request.execute()
+            master_node = response['config']['masterConfig']['instanceNames'][0].encode('utf8')
+            zone = response['config']['gceClusterConfig']['zoneUri'].encode('utf8').split('/')[-1]
+            return master_node, zone
         except HttpError as error:
-            self.handle_http_error(error)
-        master_node = response['config']['masterConfig']['instanceNames'][0].encode('utf8')
-        zone = response['config']['gceClusterConfig']['zoneUri'].encode('utf8').split('/')[-1]
-        return master_node, zone
+            self.handle_dataproc_http_error(error)
 
     def get_cluster_from_job(self, job_id):
         try:
@@ -104,11 +102,10 @@ class DataProcxy():
             cluster_name = response['placement']['clusterName'].encode('utf8')
             return cluster_name
         except HttpError as error:
-            self.handle_http_error(error)
+            self.handle_dataproc_http_error(error)
 
-    def handle_http_error(self, error):
-        print ('There was a Cloud Dataproc API call error:\n %s, %s' %
-               (error.resp.status, error._get_reason()))
+    def handle_dataproc_http_error(self, error):
+        print ('There was a Cloud Dataproc API call error:\n %s, %s' % (error.resp.status, error._get_reason()))
         if error.resp.status == 404:
             print ('Perhaps you meant a different region than the one currently set:\n %s' % (self.region))
         exit(1)
@@ -173,16 +170,18 @@ class SshProxy():
 
     def start(self):
         ssh_command = 'gcloud -q compute ssh %(masterNode)s --project %(projectId)s --zone %(zone)s -- -x -o ConnectTimeout=5 -D localhost:%(port)i -n -N' % {
-            "masterNode": self.master_node, "port": self.proxy_port, "projectId": self.project_id,
+            "masterNode": self.master_node,
+            "port": self.proxy_port,
+            "projectId": self.project_id,
             "zone": self.zone}
-        print "executing %s" % ssh_command
+        print "Executing: %s" % ssh_command
         self.ssh_process = subprocess.Popen(ssh_command, shell=True)
 
     def stop(self):
         if self.ssh_process.returncode is not None:
             try:
                 self.ssh_process.terminate()
-                for i in range(0,10):
+                for i in range(0, 10):
                     if self.ssh_process.returncode is None:
                         break
                     time.sleep(0.1)
@@ -205,16 +204,18 @@ class Browser():
     def start(self):
         self.tempdir = tempfile.mkdtemp()
         more_uris = " ".join(['"' + uri + '"' for uri in self.uris])
-        chrome_args = ('--proxy-server="socks5://localhost:%(port)i" --host-resolver-rules="MAP * 0.0.0.0 , EXCLUDE localhost" --user-data-dir=%(tempdir)s --no-default-browser-check --no-first-run --enable-kiosk-mode --new-window "http://%(masterNode)s:8088" "http://%(masterNode)s:50070" "http://%(masterNode)s:19888/jobhistory/" ' + more_uris) % {
-            "masterNode": self.masterNode, "port": self.proxyPort, "projectId": self.projectId,
+        chrome_args = '--proxy-server="socks5://localhost:%(port)i" --host-resolver-rules="MAP * 0.0.0.0 , EXCLUDE localhost" --user-data-dir=%(tempdir)s --no-default-browser-check --no-first-run --enable-kiosk-mode --new-window "http://%(masterNode)s:8088" "http://%(masterNode)s:9870" "http://%(masterNode)s:19888/jobhistory/" %(moreURIs)s' % {
+            "masterNode": self.masterNode,
+            "port": self.proxyPort,
+            "projectId": self.projectId,
             "zone": self.zone,
-            "tempdir": self.tempdir}
+            "tempdir": self.tempdir,
+            "moreURIs": more_uris}
 
-        print "proxy connected via ssh, starting chrome"
+        print "Proxy connected via ssh, starting chrome"
         if platform.system() == "Darwin":
-            chrome_path = subprocess.check_output(["mdfind","kMDItemCFBundleIdentifier","=","com.google.Chrome"]).split("\n")[0] + '/Contents/MacOS/Google Chrome'
-            self.browser_process = subprocess.Popen(
-                '"' + chrome_path + '" ' + chrome_args, shell=True)
+            chrome_path = subprocess.check_output(["mdfind", "kMDItemCFBundleIdentifier", "=", "com.google.Chrome"]).split("\n")[0] + '/Contents/MacOS/Google Chrome'
+            self.browser_process = subprocess.Popen('"' + chrome_path + '" ' + chrome_args, shell=True)
         else:
             self.browser_process = subprocess.Popen('google-chrome ' + chrome_args, shell=True)
 
@@ -225,7 +226,7 @@ class Browser():
         if self.browser_process.returncode is not None:
             try:
                 self.browser_process.terminate()
-                for i in range(0,10):
+                for i in range(0, 10):
                     if self.browser_process.returncode is None:
                         break
                     time.sleep(0.1)
@@ -234,4 +235,3 @@ class Browser():
             except OSError as error:
                 if error.errno != 3:
                     raise error
-
