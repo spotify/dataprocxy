@@ -71,52 +71,70 @@ class DataProcxy():
         self.shutdown()
 
     def get_master_status(self, master_node, zone):
-        request = self.gce_service.instances().get(
-            project=self.project_id, zone=zone, instance=master_node)
-        response = request.execute()
-        return response['status'].encode('utf8')
+        try:
+            request = self.gce_service.instances().get(project=self.project_id,
+                                                       zone=zone,
+                                                       instance=master_node)
+            response = request.execute()
+            return response['status'].encode('utf8')
+        except HttpError as error:
+            print ('There was a Compute Engine API error when trying to query a Master node:\n %s, %s' %
+                   (error.resp.status, error._get_reason()))
+            exit(1)
 
     def query_cluster(self):
-        request = self.dataproc_service.projects().regions().clusters().get(
-            projectId=self.project_id,
-            region=self.region,
-            clusterName=self.cluster_name)
-        response = request.execute()
+        response = []
+        try:
+            request = self.dataproc_service.projects().regions().clusters().get(projectId=self.project_id,
+                                                                                region=self.region,
+                                                                                clusterName=self.cluster_name)
+            response = request.execute()
+        except HttpError as error:
+            self.handle_http_error(error)
         master_node = response['config']['masterConfig']['instanceNames'][0].encode('utf8')
         zone = response['config']['gceClusterConfig']['zoneUri'].encode('utf8').split('/')[-1]
         return master_node, zone
 
+    def get_cluster_from_job(self, job_id):
+        try:
+            request = self.dataproc_service.projects().regions().jobs().get(projectId=self.project_id,
+                                                                            region=self.region,
+                                                                            jobId=job_id)
+            response = request.execute()
+            cluster_name = response['placement']['clusterName'].encode('utf8')
+            return cluster_name
+        except HttpError as error:
+            self.handle_http_error(error)
+
+    def handle_http_error(self, error):
+        print ('There was a Cloud Dataproc API call error:\n %s, %s' %
+               (error.resp.status, error._get_reason()))
+        if error.resp.status == 404:
+            print ('Perhaps you meant a different region than the one currently set:\n %s' % (self.region))
+        exit(1)
+
     def parse_args(self):
         parser = argparse.ArgumentParser(
-            description='opens a browser window to RM, NN and JHS of a dataproc cluster using an ssh session to proxy')
-        parser.add_argument('--job', help='jobid to discover cluster', nargs="?")
-        parser.add_argument('--cluster', help='cluster id of dataproc cluster to connect to',
-                            nargs="?")
-        parser.add_argument('--project', help='cloud project of the dataproc cluster', nargs="?",
-                            required=True)
-        parser.add_argument('region', nargs='?',
-                            help='Dataproc region to query',
+            description='Opens a browser window with RM, NN and JHS of a Dataproc cluster using an ssh session to proxy')
+        parser.add_argument('--job', help='Job ID to discover Dataproc cluster', nargs="?")
+        parser.add_argument('--cluster', help='Name of Dataproc cluster to connect to', nargs="?")
+        parser.add_argument('--project', help='Google Cloud project of Dataproc cluster', nargs="?", required=True)
+        parser.add_argument('region',
+                            help='Dataproc region to query (default: %(default)s)',
+                            nargs="?",
                             default='global')
-        parser.add_argument('uris', nargs='*', help='URIs to be opened!')
+        parser.add_argument('uris', nargs='*', help='URIs to be opened')
         args = parser.parse_args()
         self.project_id = args.project
         self.uris = args.uris
         self.region = args.region
         if args.job is None and args.cluster is None:
-            print 'Either job or cluster need to be specified'
+            print 'Either Job ID or cluster Name need to be specified'
             exit(1)
         if args.cluster is None:
             self.cluster_name = self.get_cluster_from_job(job_id=args.job)
         else:
             self.cluster_name = args.cluster
-
-    def get_cluster_from_job(self, job_id):
-        request = self.dataproc_service.projects().regions().jobs().get(projectId=self.project_id,
-                                                                        region=self.region,
-                                                                        jobId=job_id)
-        response = request.execute()
-        cluster_name = response['placement']['clusterName'].encode('utf8')
-        return cluster_name
 
     def shutdown(self):
         if self.proxy is not None:
@@ -147,7 +165,7 @@ class SshProxy():
                     time.sleep(0.1)
                     continue
                 else:
-                    print "unable to connect to master instance"
+                    print "Unable to connect to master instance"
                     exit(1)
             s.shutdown(socket.SHUT_RDWR)
             s.close()
