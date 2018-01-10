@@ -21,6 +21,8 @@ class DataProcxy():
         self.proxy = None
         self.browser = None
         self.region = None
+        self.job_id = None
+        self.cluster_name = None
         signal.signal(signal.SIGINT, lambda s, f: self.shutdown())
 
     def run(self):
@@ -107,7 +109,15 @@ class DataProcxy():
     def handle_dataproc_http_error(self, error):
         print ('There was a Cloud Dataproc API call error:\n %s, %s' % (error.resp.status, error._get_reason()))
         if error.resp.status == 404:
-            print ('Perhaps you meant a different region than the one currently set:\n %s' % (self.region))
+            print 'Cluster you want to connect to does not exist, please make sure your parameters are correct and there is no typo:\n' \
+                  ' * project      : %(project)s\n' \
+                  ' * region       : %(region)s\n' \
+                  ' * cluster name : %(cluster)s\n' \
+                  ' * job ID       : %(job_id)s' % {
+                      "project": self.project_id,
+                      "region": self.region,
+                      "cluster": self.cluster_name if self.cluster_name else "[NOT SPECIFIED]",
+                      "job_id": self.job_id if self.job_id else "[NOT SPECIFIED]"}
         exit(1)
 
     def parse_args(self):
@@ -125,11 +135,12 @@ class DataProcxy():
         self.project_id = args.project
         self.uris = args.uris
         self.region = args.region
-        if args.job is None and args.cluster is None:
+        self.job_id = args.job
+        if self.job_id is None and args.cluster is None:
             print 'Either Job ID or cluster Name need to be specified'
             exit(1)
         if args.cluster is None:
-            self.cluster_name = self.get_cluster_from_job(job_id=args.job)
+            self.cluster_name = self.get_cluster_from_job(job_id=self.job_id)
         else:
             self.cluster_name = args.cluster
 
