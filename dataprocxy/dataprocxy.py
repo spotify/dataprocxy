@@ -8,6 +8,7 @@ import socket
 import subprocess
 import tempfile
 import time
+import httplib2
 from googleapiclient import discovery
 from googleapiclient.errors import HttpError
 from oauth2client.client import ApplicationDefaultCredentialsError
@@ -47,8 +48,12 @@ class DataProcxy():
                 else:
                     break
 
-        self.dataproc_service = discovery.build('dataproc', 'v1', credentials=credentials)
-        self.gce_service = discovery.build('compute', 'v1', credentials=credentials)
+        try:
+            self.dataproc_service = discovery.build('dataproc', 'v1', credentials=credentials)
+            self.gce_service = discovery.build('compute', 'v1', credentials=credentials)
+        except httplib2.ServerNotFoundError as error:
+            print 'There was a Google API error when trying to connect to a server:\n %s' % (str(error))
+            exit(1)
 
         self.parse_args()
 
