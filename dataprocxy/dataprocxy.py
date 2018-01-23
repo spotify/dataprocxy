@@ -1,5 +1,6 @@
 # Copyright (c) 2015 Spotify AB
 import argparse
+import os
 import platform
 import random
 import signal
@@ -7,11 +8,9 @@ import socket
 import subprocess
 import tempfile
 import time
-import os
-
-from pprint import pprint
-
+import httplib2
 from googleapiclient import discovery
+from googleapiclient.errors import HttpError
 from oauth2client.client import ApplicationDefaultCredentialsError
 from oauth2client.client import GoogleCredentials
 
@@ -23,17 +22,22 @@ class DataProcxy():
         self.proxy = None
         self.browser = None
         self.region = None
+        self.job_id = None
+        self.cluster_name = None
         signal.signal(signal.SIGINT, lambda s, f: self.shutdown())
 
     def run(self):
         retries = 5
         if os.environ.get('GOOGLE_APPLICATION_CREDENTIALS') is not None:
-            print "WARNING: GOOGLE_APPLICATION_CREDENTIALS environment variable is set, using credentials from %s to access gcloud" % os.environ['GOOGLE_APPLICATION_CREDENTIALS']
-        for retry in range (0,retries):
+            print "WARNING: GOOGLE_APPLICATION_CREDENTIALS environment variable is set, using credentials from %s to access gcloud" % \
+                  os.environ['GOOGLE_APPLICATION_CREDENTIALS']
+        for retry in range(0, retries):
             try:
                 credentials = GoogleCredentials.get_application_default()
             except ApplicationDefaultCredentialsError as msg:
-                out = subprocess.check_output("gcloud -q auth application-default login", shell=True, stderr=subprocess.STDOUT)
+                out = subprocess.check_output("gcloud -q auth application-default login",
+                                              shell=True,
+                                              stderr=subprocess.STDOUT)
                 success = False
                 for line in out:
                     if "You are now logged in as" in out:
@@ -44,8 +48,12 @@ class DataProcxy():
                 else:
                     break
 
-        self.dataproc_service = discovery.build('dataproc', 'v1', credentials=credentials)
-        self.gce_service = discovery.build('compute', 'v1', credentials=credentials)
+        try:
+            self.dataproc_service = discovery.build('dataproc', 'v1', credentials=credentials)
+            self.gce_service = discovery.build('compute', 'v1', credentials=credentials)
+        except httplib2.ServerNotFoundError as error:
+            print 'There was a Google API error when trying to connect to a server:\n %s' % (str(error))
+            exit(1)
 
         self.parse_args()
 
@@ -71,52 +79,75 @@ class DataProcxy():
         self.shutdown()
 
     def get_master_status(self, master_node, zone):
-        request = self.gce_service.instances().get(
-            project=self.project_id, zone=zone, instance=master_node)
-        response = request.execute()
-        return response['status'].encode('utf8')
+        try:
+            request = self.gce_service.instances().get(project=self.project_id, zone=zone, instance=master_node)
+            response = request.execute()
+            return response['status'].encode('utf8')
+        except HttpError as error:
+            print ('There was a Compute Engine API error when trying to query a Master node:\n %s, %s' %
+                   (error.resp.status, error._get_reason()))
+            exit(1)
 
     def query_cluster(self):
-        request = self.dataproc_service.projects().regions().clusters().get(
-            projectId=self.project_id,
-            region=self.region,
-            clusterName=self.cluster_name)
-        response = request.execute()
-        master_node = response['config']['masterConfig']['instanceNames'][0].encode('utf8')
-        zone = response['config']['gceClusterConfig']['zoneUri'].encode('utf8').split('/')[-1]
-        return master_node, zone
+        try:
+            request = self.dataproc_service.projects().regions().clusters().get(projectId=self.project_id,
+                                                                                region=self.region,
+                                                                                clusterName=self.cluster_name)
+            response = request.execute()
+            master_node = response['config']['masterConfig']['instanceNames'][0].encode('utf8')
+            zone = response['config']['gceClusterConfig']['zoneUri'].encode('utf8').split('/')[-1]
+            return master_node, zone
+        except HttpError as error:
+            self.handle_dataproc_http_error(error)
+
+    def get_cluster_from_job(self, job_id):
+        try:
+            request = self.dataproc_service.projects().regions().jobs().get(projectId=self.project_id,
+                                                                            region=self.region,
+                                                                            jobId=job_id)
+            response = request.execute()
+            cluster_name = response['placement']['clusterName'].encode('utf8')
+            return cluster_name
+        except HttpError as error:
+            self.handle_dataproc_http_error(error)
+
+    def handle_dataproc_http_error(self, error):
+        print ('There was a Cloud Dataproc API call error:\n %s, %s' % (error.resp.status, error._get_reason()))
+        if error.resp.status == 404:
+            print 'Cluster you want to connect to does not exist, please make sure your parameters are correct and there is no typo:\n' \
+                  ' * project      : %(project)s\n' \
+                  ' * region       : %(region)s\n' \
+                  ' * cluster name : %(cluster)s\n' \
+                  ' * job ID       : %(job_id)s' % {
+                      "project": self.project_id,
+                      "region": self.region,
+                      "cluster": self.cluster_name if self.cluster_name else "[NOT SPECIFIED]",
+                      "job_id": self.job_id if self.job_id else "[NOT SPECIFIED]"}
+        exit(1)
 
     def parse_args(self):
         parser = argparse.ArgumentParser(
-            description='opens a browser window to RM, NN and JHS of a dataproc cluster using an ssh session to proxy')
-        parser.add_argument('--job', help='jobid to discover cluster', nargs="?")
-        parser.add_argument('--cluster', help='cluster id of dataproc cluster to connect to',
-                            nargs="?")
-        parser.add_argument('--project', help='cloud project of the dataproc cluster', nargs="?",
-                            required=True)
-        parser.add_argument('region', nargs='?',
-                            help='Dataproc region to query',
+            description='Opens a browser window with RM, NN and JHS of a Dataproc cluster using an ssh session to proxy')
+        parser.add_argument('--job', help='Job ID to discover Dataproc cluster', nargs="?")
+        parser.add_argument('--cluster', help='Name of Dataproc cluster to connect to', nargs="?")
+        parser.add_argument('--project', help='Google Cloud project of Dataproc cluster', nargs="?", required=True)
+        parser.add_argument('region',
+                            help='Dataproc region to query (default: %(default)s)',
+                            nargs="?",
                             default='global')
-        parser.add_argument('uris', nargs='*', help='URIs to be opened!')
+        parser.add_argument('uris', nargs='*', help='URIs to be opened')
         args = parser.parse_args()
         self.project_id = args.project
         self.uris = args.uris
         self.region = args.region
-        if args.job is None and args.cluster is None:
-            print 'Either job or cluster need to be specified'
+        self.job_id = args.job
+        if self.job_id is None and args.cluster is None:
+            print 'Either Job ID or cluster Name need to be specified'
             exit(1)
         if args.cluster is None:
-            self.cluster_name = self.get_cluster_from_job(job_id=args.job)
+            self.cluster_name = self.get_cluster_from_job(job_id=self.job_id)
         else:
             self.cluster_name = args.cluster
-
-    def get_cluster_from_job(self, job_id):
-        request = self.dataproc_service.projects().regions().jobs().get(projectId=self.project_id,
-                                                                        region=self.region,
-                                                                        jobId=job_id)
-        response = request.execute()
-        cluster_name = response['placement']['clusterName'].encode('utf8')
-        return cluster_name
 
     def shutdown(self):
         if self.proxy is not None:
@@ -147,7 +178,7 @@ class SshProxy():
                     time.sleep(0.1)
                     continue
                 else:
-                    print "unable to connect to master instance"
+                    print "Unable to connect to master instance"
                     exit(1)
             s.shutdown(socket.SHUT_RDWR)
             s.close()
@@ -155,16 +186,18 @@ class SshProxy():
 
     def start(self):
         ssh_command = 'gcloud -q compute ssh %(masterNode)s --project %(projectId)s --zone %(zone)s -- -x -o ConnectTimeout=5 -D localhost:%(port)i -n -N' % {
-            "masterNode": self.master_node, "port": self.proxy_port, "projectId": self.project_id,
+            "masterNode": self.master_node,
+            "port": self.proxy_port,
+            "projectId": self.project_id,
             "zone": self.zone}
-        print "executing %s" % ssh_command
+        print "Executing: %s" % ssh_command
         self.ssh_process = subprocess.Popen(ssh_command, shell=True)
 
     def stop(self):
         if self.ssh_process.returncode is not None:
             try:
                 self.ssh_process.terminate()
-                for i in range(0,10):
+                for i in range(0, 10):
                     if self.ssh_process.returncode is None:
                         break
                     time.sleep(0.1)
@@ -187,16 +220,18 @@ class Browser():
     def start(self):
         self.tempdir = tempfile.mkdtemp()
         more_uris = " ".join(['"' + uri + '"' for uri in self.uris])
-        chrome_args = ('--proxy-server="socks5://localhost:%(port)i" --host-resolver-rules="MAP * 0.0.0.0 , EXCLUDE localhost" --user-data-dir=%(tempdir)s --no-default-browser-check --no-first-run --enable-kiosk-mode --new-window "http://%(masterNode)s:8088" "http://%(masterNode)s:50070" "http://%(masterNode)s:19888/jobhistory/" ' + more_uris) % {
-            "masterNode": self.masterNode, "port": self.proxyPort, "projectId": self.projectId,
+        chrome_args = '--proxy-server="socks5://localhost:%(port)i" --host-resolver-rules="MAP * 0.0.0.0 , EXCLUDE localhost" --user-data-dir=%(tempdir)s --no-default-browser-check --no-first-run --enable-kiosk-mode --new-window "http://%(masterNode)s:8088" "http://%(masterNode)s:9870" "http://%(masterNode)s:19888/jobhistory/" %(moreURIs)s' % {
+            "masterNode": self.masterNode,
+            "port": self.proxyPort,
+            "projectId": self.projectId,
             "zone": self.zone,
-            "tempdir": self.tempdir}
+            "tempdir": self.tempdir,
+            "moreURIs": more_uris}
 
-        print "proxy connected via ssh, starting chrome"
+        print "Proxy connected via ssh, starting chrome"
         if platform.system() == "Darwin":
-            chrome_path = subprocess.check_output(["mdfind","kMDItemCFBundleIdentifier","=","com.google.Chrome"]).split("\n")[0] + '/Contents/MacOS/Google Chrome'
-            self.browser_process = subprocess.Popen(
-                '"' + chrome_path + '" ' + chrome_args, shell=True)
+            chrome_path = subprocess.check_output(["mdfind", "kMDItemCFBundleIdentifier", "=", "com.google.Chrome"]).split("\n")[0] + '/Contents/MacOS/Google Chrome'
+            self.browser_process = subprocess.Popen('"' + chrome_path + '" ' + chrome_args, shell=True)
         else:
             self.browser_process = subprocess.Popen('google-chrome ' + chrome_args, shell=True)
 
@@ -207,7 +242,7 @@ class Browser():
         if self.browser_process.returncode is not None:
             try:
                 self.browser_process.terminate()
-                for i in range(0,10):
+                for i in range(0, 10):
                     if self.browser_process.returncode is None:
                         break
                     time.sleep(0.1)
@@ -216,4 +251,3 @@ class Browser():
             except OSError as error:
                 if error.errno != 3:
                     raise error
-
