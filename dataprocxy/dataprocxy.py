@@ -131,7 +131,7 @@ class DataProcxy():
         parser.add_argument('--job', help='Job ID to discover Dataproc cluster', nargs="?")
         parser.add_argument('--cluster', help='Name of Dataproc cluster to connect to', nargs="?")
         parser.add_argument('--project', help='Google Cloud project of Dataproc cluster', nargs="?", required=True)
-        parser.add_argument('region',
+        parser.add_argument('--region',
                             help='Dataproc region to query (default: %(default)s)',
                             nargs="?",
                             default='global')
